@@ -1,0 +1,17 @@
+# 构建产物
+/out/
+/obj/
+*.o
+*.exe
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.swp
+
+# 本地测试用（绝对路径、账号缓存等绝不入库）
+/out/testdata/
+*.local
+cx.dat
