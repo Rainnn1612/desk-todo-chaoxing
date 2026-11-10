@@ -104,7 +104,6 @@ out\DeskTodo.exe
 - 改完**立刻生效并写盘**，没有「取消」；想回去点**恢复默认**（回到内置的莫兰迪深色）。
 - 配色存在 `config.json` 的 `cl_page` / `cl_bar` / `cl_text` / `cl_glass`（都是 `0xRRGGBB` 整数）、`glass`、`glass_a` 里，`theme` 会变成 `2` 表示自定义。
 
-![玻璃效果](docs/screenshot-glass.png)
 
   ![字体大小菜单](docs/menu-font.png)
   ![特大 135%](docs/font-135.png)
