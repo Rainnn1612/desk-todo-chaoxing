@@ -20,6 +20,7 @@
 #define MENU_SYNC     1017      /* 立即同步学习通 */
 #define MENU_COURSES  1018      /* 筛选课程（旧课退休名单） */
 #define MENU_THEME_DLG 1019     /* 主题…（自定义配色 + 玻璃） */
+#define MENU_LOGIN    1020      /* 登录学习通… */
 
 /* 字号档位（百分比） */
 static const int FONT_STEPS[4] = { 85, 100, 115, 135 };
@@ -394,6 +395,8 @@ void input_context_menu(App *a, int x, int y)
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | (a->syncing ? MF_GRAYED : 0), MENU_SYNC,
                 a->syncing ? L"同步中…" : L"立即同步学习通");
+    AppendMenuW(m, MF_STRING, MENU_LOGIN,
+                login_has_cred() ? L"登录学习通…（改账号密码）" : L"登录学习通…（必填）");
     AppendMenuW(m, MF_STRING, MENU_COURSES, L"筛选课程");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, MENU_QUIT, L"退出");
@@ -458,7 +461,13 @@ void input_context_menu(App *a, int x, int y)
         }
         break;
     case MENU_SYNC:
-        if (!a->syncing) sync_start(a);
+        if (a->syncing) break;
+        /* 还没填过账号密码 → 先去登录，登录成功会自动开始同步 */
+        if (!login_has_cred()) login_open(a);
+        else sync_start(a);
+        break;
+    case MENU_LOGIN:
+        if (!a->syncing) login_open(a);
         break;
     case MENU_COURSES:
         courses_open(a);

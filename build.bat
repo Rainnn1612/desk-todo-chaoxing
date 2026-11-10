@@ -28,7 +28,7 @@ echo [2/3] compiling resources ...
 windres res\app.rc -O coff -o obj\app_res.o || goto :err
 
 echo [3/3] compiling and linking ...
-gcc -Wall -Wextra -O2 -municode -x c src\json.c src\store.c src\theme.c src\ui.c src\input.c src\widget.c src\detail.c src\image.c src\sync.c src\courses.c src\colorpick.c src\themdlg.c src\main.c -x none obj\app_res.o -mwindows -s -static -luser32 -lgdi32 -lshell32 -ladvapi32 -lcomctl32 -lgdiplus -lcomdlg32 -o out\DeskTodo.exe || goto :err
+gcc -Wall -Wextra -O2 -municode -x c src\json.c src\store.c src\theme.c src\ui.c src\input.c src\widget.c src\detail.c src\image.c src\sync.c src\courses.c src\colorpick.c src\themdlg.c src\login.c src\main.c -x none obj\app_res.o -mwindows -s -static -luser32 -lgdi32 -lshell32 -ladvapi32 -lcomctl32 -lgdiplus -lcomdlg32 -lcrypt32 -o out\DeskTodo.exe || goto :err
 
 echo.
 for %%F in (out\DeskTodo.exe) do echo DONE: %%~fF  (%%~zF bytes)

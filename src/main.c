@@ -105,6 +105,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdline, int show)
         if (cl && wcsstr(cl, L"--sync")) sync_start(a);
         else if (cl && wcsstr(cl, L"--courses")) courses_open(a);
         else if (cl && wcsstr(cl, L"--theme")) theme_dlg_open(a);
+        else if (cl && wcsstr(cl, L"--login")) login_open(a);
     }
 
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {

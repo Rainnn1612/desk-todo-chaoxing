@@ -267,6 +267,11 @@ void sync_tick(App *a);         /* 定时器里调用：检查子进程、读进
 void sync_cancel(App *a);       /* 退出时清理 */
 int  sync_has_script(void);     /* 账号文件与脚本是否就绪 */
 
+/* ---------------- login.c（让用户自己输学习通账号密码） ---------------- */
+void login_open(App *a);        /* 打开「登录学习通」窗口（模态） */
+void login_destroy(void);       /* 主窗销毁时连带关掉 */
+int  login_has_cred(void);      /* cx.dat 是否已存在 */
+
 /* ---------------- widget.c ---------------- */
 int   widget_create(App *a, HINSTANCE hi);
 void  widget_fit(App *a);
