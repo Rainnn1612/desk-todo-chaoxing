@@ -47,6 +47,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdline, int show)
     a->drag_row = -1;
 
     store_init(a);
+    ensure_data_dir();          /* 全新电脑上这个目录还不存在，先建出来 */
     cfg_load(a);
     a->cfg.autostart = autostart_get();
 

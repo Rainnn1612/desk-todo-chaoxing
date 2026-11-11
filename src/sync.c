@@ -20,6 +20,16 @@ static void set_msg(App *a, const WCHAR *s)
     InvalidateRect(a->hwnd, NULL, FALSE);
 }
 
+/* 启动阶段的失败：把原因显示出来，并让它过一会儿自己消失。
+   原来这几条路径直接 set_msg 后 return，定时器没起来，那行字会永远挂在
+   标题栏上（而且被截断），用户既不知道原因也没法让它消失。 */
+static void fail_now(App *a, const WCHAR *s)
+{
+    set_msg(a, s);
+    a->sync_msg_left = 60;                  /* 失败信息留久一点 */
+    SetTimer(a->hwnd, T_SYNC, SYNC_TICK_MS, NULL);
+}
+
 /* 把内嵌脚本释放到数据目录，返回脚本绝对路径 */
 static int ensure_script(App *a, WCHAR *out, int n)
 {
@@ -32,6 +42,7 @@ static int ensure_script(App *a, WCHAR *out, int n)
     DWORD   wr = 0;
 
     data_path(path, MAX_PATH, L"cx_sync.ps1");
+    ensure_data_dir();          /* 目录可能还不存在（全新机器），否则下面必然写失败 */
     rs = FindResourceW(a->hi, MAKEINTRESOURCEW(SYNC_RC_ID), RT_RCDATA);
     if (!rs) return 0;
     hg = LoadResource(a->hi, rs);
@@ -147,16 +158,16 @@ static void merge_results(App *a)
 {
     WCHAR path[MAX_PATH];
     char *raw;
-    int len = 0, added = 0, i, n, nretired = 0;
+    int len = 0, added = 0, i, n, nretired = 0, nskipc = 0, nseen = 0, ndup = 0;
     JVal *root, *arr;
     WCHAR *ledger;
 
     data_path(path, MAX_PATH, L"sync.json");
     raw = read_file(path, &len);
-    if (!raw) { set_msg(a, L"同步失败：没有拿到结果"); return; }
+    if (!raw) { fail_now(a, L"同步失败：没有拿到结果"); return; }
     root = json_parse(raw);
     free(raw);
-    if (!root) { set_msg(a, L"同步失败：结果不是合法 JSON"); return; }
+    if (!root) { fail_now(a, L"同步失败：结果不是合法 JSON"); return; }
 
     if (!json_int(root, L"ok", 0)) {
         const WCHAR *e = json_wstr(root, L"error", L"未知错误");
@@ -172,6 +183,7 @@ static void merge_results(App *a)
         if (!ledger) { json_free(root); return; }
     }
     nretired = json_int(root, L"retired", 0);
+    nskipc   = json_int(root, L"skipped", 0);
 
     arr = json_get(root, L"items");
     n = arr ? arr->n : 0;
@@ -198,7 +210,7 @@ static void merge_results(App *a)
         wcat(key, title, MAX_TITLE + 256);
         wcat(key, L"|", MAX_TITLE + 256);
         wcat(key, ddl, MAX_TITLE + 256);
-        if (seen_has(ledger, key)) continue;
+        if (seen_has(ledger, key)) { nseen++; continue; }
 
         if (wlen(title) >= MAX_TITLE - 4) {
             wcpy(todo_title, title, MAX_TITLE - 3);
@@ -221,6 +233,7 @@ static void merge_results(App *a)
 
         has_ddl = ddl[0] && parse_date_str(ddl, &st);
         if (store_add_full(a, todo_title, note, has_ddl, &st)) added++;
+        else ndup++;
         seen_append(ledger, key);
     }
 
@@ -231,13 +244,28 @@ static void merge_results(App *a)
     list_build_view(a);
     store_save(a);
     widget_fit(a);
-    wcpy(a->sync_msg, L"同步完成：新增 ", 96);
-    wcat_int(a->sync_msg, added, 96);
-    wcat(a->sync_msg, L" 条", 96);
+    /* 说清「为什么是 0 条」——只说「新增 0 条」时，用户分不清是
+       「真没有新作业」还是「同步根本没跑通」，全新机器上尤其误导。 */
+    if (added > 0) {
+        wcpy(a->sync_msg, L"同步完成 +", 96);
+        wcat_int(a->sync_msg, added, 96);
+        wcat(a->sync_msg, L" 条", 96);
+    } else if (n == 0) {
+        wcpy(a->sync_msg, L"同步完成：无新作业", 96);
+    } else {
+        wcpy(a->sync_msg, L"同步完成：", 96);
+        wcat_int(a->sync_msg, nseen + ndup, 96);
+        wcat(a->sync_msg, L" 条已存在", 96);
+    }
     if (nretired > 0) {
-        wcat(a->sync_msg, L"，跳过旧课 ", 96);
+        wcat(a->sync_msg, L"，旧课 ", 96);
         wcat_int(a->sync_msg, nretired, 96);
         wcat(a->sync_msg, L" 门", 96);
+    }
+    if (nskipc > 0) {
+        wcat(a->sync_msg, L"，", 96);
+        wcat_int(a->sync_msg, nskipc, 96);
+        wcat(a->sync_msg, L" 门失败", 96);
     }
     InvalidateRect(a->hwnd, NULL, FALSE);
 }
@@ -259,17 +287,17 @@ int sync_start(App *a)
 
     if (a->syncing) return 0;
     if (!ensure_script(a, script, MAX_PATH)) {
-        set_msg(a, L"同步失败：内嵌脚本无法释放");
+        fail_now(a, L"同步失败：内嵌脚本无法释放");
         return 0;
     }
     if (!GetEnvironmentVariableW(L"SystemRoot", sysroot, MAX_PATH)) {
-        set_msg(a, L"同步失败：找不到 SystemRoot");
+        fail_now(a, L"同步失败：找不到 SystemRoot");
         return 0;
     }
     wcpy(ps, sysroot, MAX_PATH);
     wcat(ps, L"\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", MAX_PATH);
     if (GetFileAttributesW(ps) == INVALID_FILE_ATTRIBUTES) {
-        set_msg(a, L"同步失败：找不到 powershell.exe");
+        fail_now(a, L"同步失败：找不到 powershell.exe");
         return 0;
     }
 
@@ -294,7 +322,7 @@ int sync_start(App *a)
     ZeroMemory(&pi, sizeof(pi));
     if (!CreateProcessW(ps, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW,
                         NULL, NULL, &si, &pi)) {
-        set_msg(a, L"同步失败：无法启动同步进程");
+        fail_now(a, L"同步失败：无法启动同步进程");
         return 0;
     }
     CloseHandle(pi.hThread);

@@ -95,6 +95,7 @@ static int save_cred(const WCHAR *user, const WCHAR *pass)
     free(plain);
 
     data_path(path, MAX_PATH, L"cx.dat");
+    ensure_data_dir();          /* 全新机器上目录可能还不存在 */
     ok = write_atomic(path, (const char *)out.pbData, (int)out.cbData);
     SecureZeroMemory(out.pbData, out.cbData);
     LocalFree(out.pbData);

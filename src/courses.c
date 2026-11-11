@@ -163,6 +163,7 @@ static void on_save(void)
 
     data_path(path, MAX_PATH, L"sync_retired.txt");
     data_path(kpath, MAX_PATH, L"sync_keep.txt");
+    ensure_data_dir();          /* 全新机器上目录可能还不存在 */
     memset(&b, 0, sizeof(b));
     memset(&kb, 0, sizeof(kb));
 

@@ -59,6 +59,19 @@ void ensure_dir(const WCHAR *path)
     CreateDirectoryW(tmp, NULL);
 }
 
+/* 保证 %APPDATA%\DeskTodo 存在。
+   全新电脑上这个目录一开始并不存在，而 login 的 cx.dat、同步器释放的
+   cx_sync.ps1、同步结果 sync.json 都直接写在这个目录下——不先建目录，
+   第一次「立即同步」会在释放脚本那一步就失败（实测：全新机器上
+   标题栏显示「同步失败：内嵌脚本无法释放」，一条待办都进不来）。 */
+void ensure_data_dir(void)
+{
+    WCHAR dir[MAX_PATH];
+    dir[0] = 0;
+    data_path(dir, MAX_PATH, NULL);
+    if (dir[0]) ensure_dir(dir);
+}
+
 int write_atomic(const WCHAR *path, const char *data, int len)
 {
     WCHAR tmp[MAX_PATH];

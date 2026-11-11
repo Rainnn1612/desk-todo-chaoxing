@@ -169,6 +169,7 @@ void  wcat_int(WCHAR *d, int v, int n);
 void  wtrim(WCHAR *s);
 int   wlen(const WCHAR *s);
 void  ensure_dir(const WCHAR *path);
+void  ensure_data_dir(void);   /* 保证 %APPDATA%\DeskTodo 存在（全新机器首次运行必需） */
 int   write_atomic(const WCHAR *path, const char *data, int len);
 char *read_file(const WCHAR *path, int *lenout);
 
