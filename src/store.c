@@ -1146,6 +1146,16 @@ void trash_clear(App *a)
     trash_save(a);
 }
 
+/* 垃圾箱里有没有这个标题（同步用它判断「这条你删过」） */
+int trash_has_title(App *a, const WCHAR *title)
+{
+    int i;
+    if (!title || !title[0]) return 0;
+    for (i = 0; i < a->trash_n; i++)
+        if (_wcsicmp(a->trash[i].title, title) == 0) return 1;
+    return 0;
+}
+
 int trash_restore(App *a, int idx)
 {
     TrashItem *t;

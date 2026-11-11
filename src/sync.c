@@ -12,7 +12,6 @@
 #define SYNC_RC_ID      2
 #define SYNC_TICK_MS    1000
 #define SYNC_TIMEOUT    600          /* 最多等 600 秒 */
-#define SYNC_SEEN_MAX   8192         /* ledger 的宽字符容量 */
 
 static void set_msg(App *a, const WCHAR *s)
 {
@@ -97,61 +96,8 @@ static void read_progress(App *a)
     free(w);
 }
 
-/* ---------------- 已导入账本，防止删掉后被重新加回来 ---------------- */
-
-static WCHAR *seen_load(void)
-{
-    WCHAR path[MAX_PATH];
-    char *raw;
-    int len = 0;
-    WCHAR *w;
-    data_path(path, MAX_PATH, L"sync_seen.txt");
-    raw = read_file(path, &len);
-    if (!raw) return NULL;
-    w = u82w(raw);
-    free(raw);
-    if (w && wlen(w) >= SYNC_SEEN_MAX) w[SYNC_SEEN_MAX - 1] = 0;
-    return w;
-}
-
-static int seen_has(const WCHAR *ledger, const WCHAR *key)
-{
-    const WCHAR *p = ledger;
-    int kl = wlen(key);
-    if (!ledger || !kl) return 0;
-    while (*p) {
-        const WCHAR *e = p;
-        while (*e && *e != L'\n') e++;
-        if ((int)(e - p) == kl) {
-            int i, same = 1;
-            for (i = 0; i < kl; i++) if (p[i] != key[i]) { same = 0; break; }
-            if (same) return 1;
-        }
-        p = (*e) ? e + 1 : e;
-    }
-    return 0;
-}
-
-static void seen_append(WCHAR *ledger, const WCHAR *key)
-{
-    int cur = wlen(ledger);
-    int kl  = wlen(key);
-    if (cur + kl + 2 >= SYNC_SEEN_MAX) return;
-    if (cur) ledger[cur++] = L'\n';
-    wcpy(ledger + cur, key, SYNC_SEEN_MAX - cur);
-}
-
-static void seen_save(const WCHAR *ledger)
-{
-    WCHAR path[MAX_PATH];
-    char *u8;
-    data_path(path, MAX_PATH, L"sync_seen.txt");
-    u8 = w2u8(ledger ? ledger : L"");
-    if (!u8) return;
-    write_atomic(path, u8, (int)strlen(u8));
-    free(u8);
-}
-
+/* 账本（sync_seen.txt）已废弃：删掉的待办本来就落在「垃圾箱」里，
+   同步时直接拿垃圾箱当黑名单，比另记一份隐形账本更好理解、也能随垃圾箱清空。 */
 /* ---------------- 合并 sync.json ---------------- */
 
 static void merge_results(App *a)
@@ -159,8 +105,8 @@ static void merge_results(App *a)
     WCHAR path[MAX_PATH];
     char *raw;
     int len = 0, added = 0, i, n, nretired = 0, nskipc = 0, nseen = 0, ndup = 0;
+    int use_tomb;
     JVal *root, *arr;
-    WCHAR *ledger;
 
     data_path(path, MAX_PATH, L"sync.json");
     raw = read_file(path, &len);
@@ -177,20 +123,18 @@ static void merge_results(App *a)
         return;
     }
 
-    ledger = seen_load();
-    if (!ledger) {
-        ledger = (WCHAR *)calloc(SYNC_SEEN_MAX, sizeof(WCHAR));
-        if (!ledger) { json_free(root); return; }
-    }
     nretired = json_int(root, L"retired", 0);
     nskipc   = json_int(root, L"skipped", 0);
+    /* 「垃圾箱当黑名单」只在列表非空时生效：
+       列表被清空 = 用户想重新来一遍，这时不要用删除记录把他挡回去。 */
+    use_tomb = (a->todos.n > 0);
 
     arr = json_get(root, L"items");
     n = arr ? arr->n : 0;
     for (i = 0; i < n; i++) {
         JVal *it = arr->items[i];
         const WCHAR *kind, *course, *title, *status, *ddl, *sid;
-        WCHAR todo_title[MAX_TITLE], note[256], key[MAX_TITLE + 256];
+        WCHAR todo_title[MAX_TITLE], note[256];
         SYSTEMTIME st;
         int has_ddl;
 
@@ -202,15 +146,6 @@ static void merge_results(App *a)
         ddl    = json_wstr(it, L"ddl",    L"");
         sid    = json_wstr(it, L"sid",    L"");
         if (!title[0]) continue;
-
-        wcpy(key, kind, MAX_TITLE + 256);
-        wcat(key, L"|", MAX_TITLE + 256);
-        wcat(key, course, MAX_TITLE + 256);
-        wcat(key, L"|", MAX_TITLE + 256);
-        wcat(key, title, MAX_TITLE + 256);
-        wcat(key, L"|", MAX_TITLE + 256);
-        wcat(key, ddl, MAX_TITLE + 256);
-        if (seen_has(ledger, key)) { nseen++; continue; }
 
         if (wlen(title) >= MAX_TITLE - 4) {
             wcpy(todo_title, title, MAX_TITLE - 3);
@@ -225,6 +160,9 @@ static void merge_results(App *a)
             wcpy(todo_title, t2, MAX_TITLE);
         }
 
+        /* 你手动删过它（在垃圾箱里）就不再塞回来；列表空着时不算删过 */
+        if (use_tomb && trash_has_title(a, todo_title)) { nseen++; continue; }
+
         note[0] = 0;
         wcat(note, L"学习通", 256);
         if (course[0]) { wcat(note, L" · ", 256); wcat(note, course, 256); }
@@ -234,11 +172,8 @@ static void merge_results(App *a)
         has_ddl = ddl[0] && parse_date_str(ddl, &st);
         if (store_add_full(a, todo_title, note, has_ddl, &st)) added++;
         else ndup++;
-        seen_append(ledger, key);
     }
 
-    seen_save(ledger);
-    free(ledger);
     json_free(root);
 
     list_build_view(a);
@@ -252,6 +187,11 @@ static void merge_results(App *a)
         wcat(a->sync_msg, L" 条", 96);
     } else if (n == 0) {
         wcpy(a->sync_msg, L"同步完成：无新作业", 96);
+    } else if (nseen > 0 && ndup == 0) {
+        /* 全都因为你删过而跳过 —— 得说清楚，否则看起来像同步坏了 */
+        wcpy(a->sync_msg, L"同步完成：", 96);
+        wcat_int(a->sync_msg, nseen, 96);
+        wcat(a->sync_msg, L" 条你删过（在垃圾箱里）", 96);
     } else {
         wcpy(a->sync_msg, L"同步完成：", 96);
         wcat_int(a->sync_msg, nseen + ndup, 96);
