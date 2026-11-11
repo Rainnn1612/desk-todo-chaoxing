@@ -120,12 +120,30 @@ if ($semOpts.Count -eq 0) {
   }
 }
 
+# 每门课自己的 cpi（账号 personId）→ 换账号也能用；取不到时回落到本次抓到的第一个
+$cpiMap = @{}
+$cpiDefault = ''
+function Get-Cpi([string]$cid, [string]$clz) {
+  $k = $cid + '_' + $clz
+  if ($cpiMap.ContainsKey($k) -and $cpiMap[$k]) { return $cpiMap[$k] }
+  if ($cpiDefault) { return $cpiDefault }
+  return ''
+}
+
 function FetchCourses([string]$sectionId, [string]$semesterNum) {
   $u = $hostBase + '/fyportal/courselist/getStudyCourse?sectionId=' + $sectionId + '&semesterNum=' + $semesterNum + '&coursesource=0&coursename=&searchkkstatus=0&belongSchoolId=0'
   $f = (Invoke-WebRequest -Uri $u -UseBasicParsing -WebSession $sess -UserAgent $ua -Headers @{ Referer = $coursePageUrl } -TimeoutSec 60).Content
   $ckmap = @{}
   foreach ($m in [regex]::Matches($f, 'entercoursenewfy\?role=3&courseId=(\d+)&clazzId=(\d+)&cpi=(\d+)&ckenc=([0-9a-f]+)')) {
-    $ckmap[$m.Groups[1].Value + '_' + $m.Groups[2].Value] = $m.Groups[4].Value
+    $k = $m.Groups[1].Value + '_' + $m.Groups[2].Value
+    $ckmap[$k] = $m.Groups[4].Value
+    # cpi 是账号级的 personId（每个账号不同），必须从课程卡片链接里按课程取，绝不能写死
+    $cv = $m.Groups[3].Value
+    if ($cv) {
+      # 必须显式写 $script: —— 函数内部的赋值会创建局部变量，外面根本看不到
+      $script:cpiMap[$k] = $cv
+      if (-not $script:cpiDefault) { $script:cpiDefault = $cv }
+    }
   }
   $out = @()
   foreach ($c in [regex]::Matches($f, '<li class="w_couritem[^>]*cid="(\d+)"\s+classid="(\d+)"\s+cname="([^"]*)"')) {
@@ -140,6 +158,7 @@ $seenCou = @{}
 $dbgCurN = 0
 $dbgAllN = 0
 $dbgWarn = ''
+$noSem = 0
 try {
   # 要查哪些学期：① 带 selected="true" 的那一项（页面自己标的当前学期）
   #               ② 下拉里的前两项（兜底，防止排序不同导致 ① 不是真正上课的那个学期）
@@ -178,8 +197,14 @@ try {
       }
     }
   } else {
-    $dbgWarn = '没有解析到学期下拉（页面结构变了？）'
+    # 有些人的门户（例如 fycourse.fanya.chaoxing.com/courselist/mycourse）根本没有学期下拉，
+    # 课程只能从 sectionId=0 拿。这种账号把拿到的课一律按「当前学期」处理：重试给满、
+    # 且不参与自动退休 —— 宁可慢一点，也不要因为判错学期把作业漏掉。
+    $dbgWarn = '没有学期下拉，按全部课程处理'
+    $noSem = 1
   }
+  $defCur = 0
+  if ($noSem -eq 1) { $defCur = 1 }
 
   # sectionId=0 = 历史学期（当前学期拿不到，必须靠上面那次）
   WriteProg '查询全部课程'
@@ -188,7 +213,7 @@ try {
   $dbgAllN = $all.Count
   foreach ($c in $all) {
     $key = $c[0] + '_' + $c[1]
-    if (-not $seenCou.ContainsKey($key)) { $seenCou[$key] = 1; $courses += , @($c[0], $c[1], $c[2], $c[3], 0) }
+    if (-not $seenCou.ContainsKey($key)) { $seenCou[$key] = 1; $courses += , @($c[0], $c[1], $c[2], $c[3], $defCur) }
   }
 } catch { Fail ('获取课程列表异常: ' + $_.Exception.Message) }
 
@@ -274,7 +299,7 @@ foreach ($c in $courses) {
   for ($try = 1; $try -le $tmax; $try++) {
     try {
       Pace
-      $entry = $hostBase + '/fyportal/courselist/entercoursenewfy?role=3&courseId=' + $cid + '&clazzId=' + $clz + '&cpi=482497561&ckenc=' + $ck
+      $entry = $hostBase + '/fyportal/courselist/entercoursenewfy?role=3&courseId=' + $cid + '&clazzId=' + $clz + '&cpi=' + (Get-Cpi $cid $clz) + '&ckenc=' + $ck
       $x = Invoke-WebRequest -Uri $entry -UseBasicParsing -WebSession $sess -UserAgent $ua -TimeoutSec 45
       $page = $x.Content
       $ref = $x.BaseResponse.ResponseUri.ToString()
@@ -300,7 +325,7 @@ foreach ($c in $courses) {
 
   try {
     Pace
-    $wu = 'https://mooc1.chaoxing.com/work/getAllWork?courseId=' + $cid + '&classId=' + $clz + '&isdisplaytable=2&ut=s&cpi=482497561&openc=' + $openc + '&enc=' + $oldenc
+    $wu = 'https://mooc1.chaoxing.com/work/getAllWork?courseId=' + $cid + '&classId=' + $clz + '&isdisplaytable=2&ut=s&cpi=' + (Get-Cpi $cid $clz) + '&openc=' + $openc + '&enc=' + $oldenc
     $wh = (Invoke-WebRequest -Uri $wu -UseBasicParsing -WebSession $sess -UserAgent $ua -Headers @{ Referer = $ref } -TimeoutSec 45).Content
     $chunks = [regex]::Split($wh, 'class="titTxt"')
     $rowN = $chunks.Count - 1
@@ -323,8 +348,10 @@ foreach ($c in $courses) {
         }
       }
       if ($status -match '已完成|待批阅') { continue }
-      # 已过期且超过 30 天的老作业不再收，否则整屏都是上学期的红色条目
-      if ($status -match '已过期' -and $deadline) {
+      # 已过期且超过 30 天的老作业一律不再收，否则整屏都是上学期的红色条目。
+      # 注意：不能只对「作业状态=已过期」的行走这条规则 —— 有些页面的状态栏是空的，
+      # 只看截止时间才靠得住。
+      if ($deadline) {
         $dtOld = [datetime]::MinValue
         if ([datetime]::TryParseExact($deadline, 'yyyy-MM-dd HH:mm', $null, 'None', [ref]$dtOld)) {
           if ($dtOld -lt (Get-Date).AddDays(-30)) { continue }
@@ -364,7 +391,7 @@ foreach ($c in $courses) {
   if ($DoExam) {
     try {
       Pace
-      $eu = 'https://mooc1.chaoxing.com/exam/test?courseId=' + $cid + '&classId=' + $clz + '&ut=s&cpi=482497561&openc=' + $openc + '&enc=' + $enc
+      $eu = 'https://mooc1.chaoxing.com/exam/test?courseId=' + $cid + '&classId=' + $clz + '&ut=s&cpi=' + (Get-Cpi $cid $clz) + '&openc=' + $openc + '&enc=' + $enc
       $eh = (Invoke-WebRequest -Uri $eu -UseBasicParsing -WebSession $sess -UserAgent $ua -Headers @{ Referer = $ref } -TimeoutSec 45).Content
       if ($eh -notmatch '暂无内容') {
         $echunks = [regex]::Split($eh, 'class="titTxt"')
@@ -409,6 +436,7 @@ $dbg = @{
   cur    = $dbgCurN
   all    = $dbgAllN
   warn   = $dbgWarn
+  cpi    = $cpiDefault
   secs   = [int]((Get-Date) - $t0).TotalSeconds
   failed = @($failNames | Select-Object -First 8)
 }
