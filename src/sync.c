@@ -265,7 +265,8 @@ static void merge_results(App *a)
     if (nskipc > 0) {
         wcat(a->sync_msg, L"，", 96);
         wcat_int(a->sync_msg, nskipc, 96);
-        wcat(a->sync_msg, L" 门失败", 96);
+        /* 失败基本都是被限流了：告诉用户「过几分钟再点一次」比只报数字有用 */
+        wcat(a->sync_msg, L" 门限流未完成", 96);
     }
     InvalidateRect(a->hwnd, NULL, FALSE);
 }

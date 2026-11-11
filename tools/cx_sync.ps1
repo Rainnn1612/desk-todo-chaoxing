@@ -16,12 +16,15 @@ $RetireFile = Join-Path $DataDir 'sync_retired.txt'
 $CredFile = Join-Path $DataDir 'cx.dat'
 
 # 发包节奏与重试
-$PaceMs   = 2600
+$PaceMs   = 3500
 $TryMax   = 3
 $DoExam   = $false   # 考试页结构未验证，默认不做，避免多一倍请求触发限流
 # 一门课「最新的作业」都比这个天数还老 → 认定是已经结束的旧课，记进退休名单，
 # 以后每次同步都直接跳过（不再请求它的入口页和作业列表）。
 $RetireDays = 100
+# 一次同步最多跑这么久（秒）。超时就带着已拿到的结果收工，别让用户干等，
+# 也别撞上主程序那边的 600 秒超时（那会直接杀掉进程、结果全丢）。
+$BudgetSec = 460
 
 function Clean([string]$s) {
   if ($null -eq $s) { return '' }
@@ -87,10 +90,34 @@ try {
 } catch { Fail ('获取课程页异常: ' + $_.Exception.Message) }
 
 # 学期下拉：<option value="44312" semesterNum="20261" selected="true" >2026秋</option>
+# 注意两点：
+#   ① 不能只认「下拉第一项」——页面排序会变，真正代表当前学期的是 selected="true" 那一项。
+#   ② 不能假设属性顺序固定，所以先把整个 <select name="xq"> 抠出来，再逐个 option 解析。
+# 第四列 = 是否选中。
 $semOpts = @()
-foreach ($o in [regex]::Matches($cp, '<option value="(\d+)" semesterNum="(\d+)"[^>]*>\s*([^<]*?)\s*</option>')) {
-  if ($o.Groups[1].Value -eq '0') { continue }
-  $semOpts += , @($o.Groups[1].Value, $o.Groups[2].Value, $o.Groups[3].Value)
+$selBlock = [regex]::Match($cp, '(?s)<select[^>]*name="xq"[^>]*>(.*?)</select>')
+if ($selBlock.Success) {
+  foreach ($o in [regex]::Matches($selBlock.Groups[1].Value, '<option([^>]*)>([^<]*)</option>')) {
+    $attrs = $o.Groups[1].Value
+    $mv = [regex]::Match($attrs, 'value="(\d+)"')
+    if (-not $mv.Success) { continue }
+    if ($mv.Groups[1].Value -eq '0') { continue }
+    $mn = [regex]::Match($attrs, 'semesterNum="(\d+)"')
+    $semNum = ''
+    if ($mn.Success) { $semNum = $mn.Groups[1].Value }
+    $semSel = 0
+    if ($attrs -match 'selected') { $semSel = 1 }
+    $semOpts += , @($mv.Groups[1].Value, $semNum, (Clean $o.Groups[2].Value), $semSel)
+  }
+}
+# 兜底：有的页面把下拉拆在不同结构里，整页再扫一遍
+if ($semOpts.Count -eq 0) {
+  foreach ($o in [regex]::Matches($cp, '<option value="(\d+)" semesterNum="(\d+)"([^>]*)>\s*([^<]*?)\s*</option>')) {
+    if ($o.Groups[1].Value -eq '0') { continue }
+    $semSel = 0
+    if ($o.Groups[3].Value -match 'selected') { $semSel = 1 }
+    $semOpts += , @($o.Groups[1].Value, $o.Groups[2].Value, (Clean $o.Groups[4].Value), $semSel)
+  }
 }
 
 function FetchCourses([string]$sectionId, [string]$semesterNum) {
@@ -110,22 +137,55 @@ function FetchCourses([string]$sectionId, [string]$semesterNum) {
 
 $courses = @()
 $seenCou = @{}
+$dbgCurN = 0
+$dbgAllN = 0
+$dbgWarn = ''
 try {
-  WriteProg '查询全部课程'
-  Pace
-  # 当前学期（下拉第一项）必须排在最前面查：限流时循环尾部的课最先被放弃，
-  # 而当前学期的作业正是用户最需要的那批。sectionId=0 拿不到当前学期的课。
+  # 要查哪些学期：① 带 selected="true" 的那一项（页面自己标的当前学期）
+  #               ② 下拉里的前两项（兜底，防止排序不同导致 ① 不是真正上课的那个学期）
+  # 多查一次只多一个请求，但能避免「只同步到老课」这种最要命的错误。
+  # 先只查「当前学期」（页面 selected="true" 的那一项，没有标记就取第一项）。
+  # 限流是按请求量算的，所以额外学期只在「当前学期查到 0 门」时才补查。
+  $selIdx = -1
+  for ($i = 0; $i -lt $semOpts.Count; $i++) {
+    if ($semOpts[$i][3] -eq 1) { $selIdx = $i; break }
+  }
+  if ($selIdx -lt 0) { $selIdx = 0 }
   if ($semOpts.Count -gt 0) {
-    $cur = $semOpts[0]
+    $cur = $semOpts[$selIdx]
     WriteProg ('查询 ' + $cur[2] + ' 课程')
     Pace
-    $curList = FetchCourses $cur[0] $cur[1]
-    foreach ($c in $curList) {
+    $lst = FetchCourses $cur[0] $cur[1]
+    $dbgCurN = $lst.Count
+    foreach ($c in $lst) {
       $key = $c[0] + '_' + $c[1]
       if (-not $seenCou.ContainsKey($key)) { $seenCou[$key] = 1; $courses += , @($c[0], $c[1], $c[2], $c[3], 1) }
     }
+    # 兜底：当前学期一门都没查到，可能是排序/标记不同，试着补查下拉里的其它学期
+    if ($lst.Count -eq 0) {
+      $extra = 0
+      for ($i = 0; $i -lt $semOpts.Count -and $extra -lt 2; $i++) {
+        if ($i -eq $selIdx) { continue }
+        $o = $semOpts[$i]
+        WriteProg ('兜底查询 ' + $o[2] + ' 课程')
+        Pace
+        $l2 = FetchCourses $o[0] $o[1]
+        $extra++
+        foreach ($c in $l2) {
+          $key = $c[0] + '_' + $c[1]
+          if (-not $seenCou.ContainsKey($key)) { $seenCou[$key] = 1; $courses += , @($c[0], $c[1], $c[2], $c[3], 1) }
+        }
+      }
+    }
+  } else {
+    $dbgWarn = '没有解析到学期下拉（页面结构变了？）'
   }
+
+  # sectionId=0 = 历史学期（当前学期拿不到，必须靠上面那次）
+  WriteProg '查询全部课程'
+  Pace
   $all = FetchCourses '0' ''
+  $dbgAllN = $all.Count
   foreach ($c in $all) {
     $key = $c[0] + '_' + $c[1]
     if (-not $seenCou.ContainsKey($key)) { $seenCou[$key] = 1; $courses += , @($c[0], $c[1], $c[2], $c[3], 0) }
@@ -134,17 +194,41 @@ try {
 
 if ($courses.Count -eq 0) { Fail '课程列表为空（可能登录态失效）' }
 
+# 上一次被限流丢掉的课，这一次排到最前面先处理：
+# 用户最需要的（当前学期有作业的）课通常在列表尾部，限流往往也是尾部先中招，
+# 把上一次没拿到的那几门提到队首，就有最大的机会在额度还没耗尽时拿到。
+$pendingFile = Join-Path $DataDir 'sync_pending.txt'
+$pend = @{}
+if (Test-Path -LiteralPath $pendingFile) {
+  foreach ($ln in (Get-Content -LiteralPath $pendingFile -Encoding UTF8)) {
+    if ($ln -match '^(\d+_\d+)') { $pend[$Matches[1]] = 1 }
+  }
+}
+if ($pend.Count -gt 0) {
+  $head = @()
+  $tail = @()
+  foreach ($c in $courses) {
+    if ($pend.ContainsKey($c[0] + '_' + $c[1])) { $head += , $c } else { $tail += , $c }
+  }
+  $courses = @($head) + @($tail)
+  WriteProg ('上次未完成的 ' + $head.Count + ' 门课优先处理')
+}
+
 $items = New-Object System.Collections.ArrayList
 $total = $courses.Count
 $idx = 0
 $skipped = 0
 $thr = 0
 $retiredN = 0
+$failNames = New-Object System.Collections.ArrayList
+$failKeys = New-Object System.Collections.ArrayList
 
 # 读退休名单（cid_clz \t 课程名 \t 最后作业日期 / 无作业 / 手动）
 # 第三列写「手动」的是用户在「筛选课程」里手工加进来的，那门课即使属于当前学期也照样跳过。
 $retired = @{}
 $retiredMan = @{}
+$t0 = Get-Date
+$budgetHit = $false
 if (Test-Path -LiteralPath $RetireFile) {
   foreach ($ln in (Get-Content -LiteralPath $RetireFile -Encoding UTF8)) {
     if ($ln -match '^(\d+_\d+)\t([^\t]*)(?:\t(.*))?$') {
@@ -165,6 +249,8 @@ if (Test-Path -LiteralPath $keepFile) {
 }
 
 foreach ($c in $courses) {
+  # 总时长预算：宁可带着已拿到的结果收工，也别拖到主程序 600 秒超时被杀掉（那样一条都留不下）
+  if (((Get-Date) - $t0).TotalSeconds -gt $BudgetSec) { $budgetHit = $true; break }
   $cid = $c[0]; $clz = $c[1]; $cname = $c[2]; $ck = $c[3]; $isCur = $c[4]
   $couKey = $cid + '_' + $clz
   $idx++
@@ -177,7 +263,7 @@ foreach ($c in $courses) {
     continue
   }
   WriteProg ("$idx/$total " + $cname)
-  if (-not $ck) { $skipped++; continue }
+  if (-not $ck) { $skipped++; [void]$failNames.Add($cname + '(无课enc)'); [void]$failKeys.Add($couKey); continue }
 
   $page = $null
   $ref = $refer
@@ -197,16 +283,17 @@ foreach ($c in $courses) {
       $oldenc = [regex]::Match($page, 'id="oldenc"[^>]*value="([^"]*)"').Groups[1].Value
       if ($oldenc) { break }
       WriteProg ("$idx/$total " + $cname + ' 限流重试')
-      Start-Sleep -Seconds (5 * $try)
+      Start-Sleep -Seconds (15 * $try)
     } catch {
-      Start-Sleep -Seconds (5 * $try)
+      Start-Sleep -Seconds (15 * $try)
     }
   }
   if (-not $oldenc) {
     $thr++
     $skipped++
+    [void]$failNames.Add($cname + '(无入口页)'); [void]$failKeys.Add($couKey)
     # 连续 3 门拿不到入口页就整体歇 60 秒：限流是按请求量算的，硬撞只会更糟
-    if ($thr -ge 3) { WriteProg '限流休息 60 秒'; Start-Sleep -Seconds 60; $thr = 0 }
+    if ($thr -ge 3) { WriteProg '限流休息 90 秒'; Start-Sleep -Seconds 90; $thr = 0 }
     continue
   }
   $thr = 0
@@ -317,6 +404,30 @@ try {
   [System.IO.File]::WriteAllText((Join-Path $DataDir 'courses.json'), $cj, (New-Object System.Text.UTF8Encoding($false)))
 } catch { }
 
-WriteResult @{ ok = $true; at = (Get-Date).ToString('s'); error = ''; skipped = $skipped; retired = $retiredN; total = $total; items = @($items) }
+$dbg = @{
+  sem    = [Math]::Min($semOpts.Count, 9)
+  cur    = $dbgCurN
+  all    = $dbgAllN
+  warn   = $dbgWarn
+  secs   = [int]((Get-Date) - $t0).TotalSeconds
+  failed = @($failNames | Select-Object -First 8)
+}
+# 记下这次被限流挡住的课，下次点同步时它们排到队首
+try {
+  if ($failKeys.Count -gt 0) {
+    $pl = @()
+    foreach ($c in $courses) {
+      if ($failKeys.Contains($c[0] + '_' + $c[1])) { $pl += (($c[0] + '_' + $c[1]) + "`t" + $c[2]) }
+    }
+    if ($pl.Count -gt 0) {
+      [System.IO.File]::WriteAllText($pendingFile, (($pl -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+    } else {
+      Remove-Item -LiteralPath $pendingFile -Force -ErrorAction SilentlyContinue
+    }
+  } else {
+    Remove-Item -LiteralPath $pendingFile -Force -ErrorAction SilentlyContinue
+  }
+} catch { }
+WriteResult @{ ok = $true; at = (Get-Date).ToString('s'); error = ''; skipped = $skipped; retired = $retiredN; total = $total; partial = $budgetHit; failed = @($failNames | Select-Object -First 8); debug = $dbg; items = @($items) }
 if ($retiredN -gt 0) { WriteProg ('完成: 新增 ' + $items.Count + ' 条，跳过旧课 ' + $retiredN + ' 门') }
 else { WriteProg ('完成: 新增 ' + $items.Count + ' 条') }
