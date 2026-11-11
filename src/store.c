@@ -59,6 +59,24 @@ void ensure_dir(const WCHAR *path)
     CreateDirectoryW(tmp, NULL);
 }
 
+/* 保证某个文件路径的父目录存在（"backup\trash-....json" 这种多一层也能建） */
+static void ensure_parent(WCHAR *path)
+{
+    WCHAR *p = wcsrchr(path, L'\\');
+    if (!p) return;
+    *p = 0;
+    ensure_dir(path);
+    *p = L'\\';
+}
+
+/* 两位数字，写进 buf（用于时间戳文件名） */
+static void pad2(WCHAR *buf, int v)
+{
+    buf[0] = (WCHAR)(L'0' + (v / 10) % 10);
+    buf[1] = (WCHAR)(L'0' + v % 10);
+    buf[2] = 0;
+}
+
 /* 保证 %APPDATA%\DeskTodo 存在。
    全新电脑上这个目录一开始并不存在，而 login 的 cx.dat、同步器释放的
    cx_sync.ps1、同步结果 sync.json 都直接写在这个目录下——不先建目录，
@@ -1066,8 +1084,13 @@ int cfg_load(App *a)
 
 void trash_save(App *a)
 {
+    trash_write(a, L"trash.json");
+}
+
+void trash_write(App *a, const WCHAR *rel)
+{
     SB b;
-    WCHAR path[MAX_PATH], dir[MAX_PATH];
+    WCHAR path[MAX_PATH];
     int i;
     b.p = NULL; b.len = 0; b.cap = 0;
     sb_puts(&b, "{\n  \"version\": 1,\n  \"items\": [");
@@ -1082,11 +1105,34 @@ void trash_save(App *a)
         sb_putc(&b, '}');
     }
     sb_puts(&b, a->trash_n ? "\n  ]\n}\n" : "]\n}\n");
-    data_path(path, MAX_PATH, L"trash.json");
-    data_path(dir, MAX_PATH, NULL);
-    ensure_dir(dir);
+    data_path(path, MAX_PATH, rel);
+    ensure_parent(path);
     write_atomic(path, b.p ? b.p : "{}", b.len);
     free(b.p);
+}
+
+/* backup\trash-20261111-152030.json */
+void trash_snapshot(App *a)
+{
+    WCHAR rel[MAX_PATH], num[8];
+    SYSTEMTIME st;
+    if (a->trash_n <= 0) return;
+    GetLocalTime(&st);
+    wcpy(rel, L"backup\\trash-", MAX_PATH);
+    num[0] = (WCHAR)(L'0' + (st.wYear / 1000) % 10);
+    num[1] = (WCHAR)(L'0' + (st.wYear / 100) % 10);
+    num[2] = (WCHAR)(L'0' + (st.wYear / 10) % 10);
+    num[3] = (WCHAR)(L'0' + st.wYear % 10);
+    num[4] = 0;
+    wcat(rel, num, MAX_PATH);
+    pad2(num, st.wMonth);  wcat(rel, num, MAX_PATH);
+    pad2(num, st.wDay);    wcat(rel, num, MAX_PATH);
+    wcat(rel, L"-", MAX_PATH);
+    pad2(num, st.wHour);   wcat(rel, num, MAX_PATH);
+    pad2(num, st.wMinute); wcat(rel, num, MAX_PATH);
+    pad2(num, st.wSecond); wcat(rel, num, MAX_PATH);
+    wcat(rel, L".json", MAX_PATH);
+    trash_write(a, rel);
 }
 
 void trash_load(App *a)
@@ -1138,9 +1184,12 @@ void trash_drop(App *a, int idx)
     trash_save(a);
 }
 
+/* 清空垃圾箱是唯一真正销毁数据的地方，动手前先留一份快照到
+   backup\trash-YYYYMMDD-HHMMSS.json，出事还能捞回来。 */
 void trash_clear(App *a)
 {
     int i;
+    trash_snapshot(a);
     for (i = 0; i < a->trash_n; i++) trash_free_item(&a->trash[i]);
     a->trash_n = 0;
     trash_save(a);

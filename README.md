@@ -97,6 +97,7 @@ out\DeskTodo.exe
 - 每行显示：标题 · 说明开头 · DDL · 删于什么时候。
 - 选中一条 →「恢复」：按删除时的样子回到列表末尾（标题、DDL、完成状态、说明都带回来）；双击行也行。
 - 「彻底删除」和「清空垃圾箱」都会先弹一次确认。
+- **清空垃圾箱之前会先自动留一份快照**：`%APPDATA%\DeskTodo\backup\trash-20261111-151624.json` 这种文件名。后悔了就把那个文件改名成 `trash.json` 覆盖回去，重启程序就回来了（「删除」只往垃圾箱里挪，不会销毁任何东西，所以整个程序里唯一会销毁数据的动作只有「彻底删除」和「清空垃圾箱」，这两处都留了后路）。
 - 数据存在 `%APPDATA%\DeskTodo\trash.json`，和 `todos.json` 分开，删待办不会动到你现有的数据文件。
 
   ![垃圾箱](docs/screenshot-trash.png)
@@ -184,7 +185,7 @@ out\DeskTodo.exe
 | --- | --- |
 | 待办数据 | `%APPDATA%\DeskTodo\todos.json` |
 | 窗口设置 | `%APPDATA%\DeskTodo\config.json`
-| 垃圾箱 | `%APPDATA%\DeskTodo\trash.json`（最近删掉的 20 条） |
+| 垃圾箱 | `%APPDATA%\DeskTodo\trash.json`（最近删掉的 20 条）、`backup\trash-*.json`（清空前的快照） |
 | 学习通账号 | `%APPDATA%\DeskTodo\cx.dat`（DPAPI 加密，换电脑/换用户要重新保存） |
 | 同步脚本 | `%APPDATA%\DeskTodo\cx_sync.ps1`（从 exe 内嵌资源释放） |
 | 同步结果 | `%APPDATA%\DeskTodo\sync.json`（最近一次原始结果）、`sync.progress`（进度）、`sync_retired.txt`（旧课退休名单）、`sync_keep.txt`（不许自动退休的保留名单）、`sync_pending.txt`（上次被限流没拿到的课，下次优先）、`courses.json`（最近一次识别到的课程清单，「筛选课程」就是读它） |

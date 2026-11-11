@@ -229,6 +229,8 @@ int   trash_restore(App *a, int idx);     /* 恢复到待办列表，1 = 成功 
 void  trash_drop(App *a, int idx);        /* 从垃圾箱里彻底删掉 */
 void  trash_clear(App *a);
 void  trash_save(App *a);
+void  trash_write(App *a, const WCHAR *rel);
+void  trash_snapshot(App *a);   /* 清空垃圾箱前留快照，出事了还能捞 */
 int   trash_has_title(App *a, const WCHAR *title);   /* 垃圾箱里有没有这条（同步黑名单） */
 
 /* ---------------- detail.c ---------------- */
