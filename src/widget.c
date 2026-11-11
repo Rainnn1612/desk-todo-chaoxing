@@ -663,6 +663,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         courses_destroy();         /* 筛选课程窗口同理 */
         theme_dlg_destroy();       /* 主题窗口同理 */
         login_destroy();           /* 登录窗口同理 */
+        trash_win_destroy();       /* 垃圾箱窗口同理 */
         if (a) sync_cancel(a);     /* 同步子进程还没结束就杀掉，别留孤儿 powershell */
         if (a && !a->quit) {
             a->quit = 1;

@@ -48,6 +48,7 @@
 #define MAX_NOTE     2048
 #define MAXTOK       24
 #define MAX_VIS_ROWS 8
+#define TRASH_MAX    20      /* 垃圾箱最多留多少条（超出丢最旧的） */
 
 /* 调色板下标 */
 enum { C_BG, C_BORDER, C_HEAD, C_TEXT, C_MUTED, C_HOVER, C_OVERDUE, C_TODAY,
@@ -68,6 +69,16 @@ typedef struct {
     int  *view;      /* 显示顺序 -> 数组下标 */
     int   vcap;
 } TodoList;
+
+/* 垃圾箱条目：删掉时的样子 + 删除时间（只用于显示） */
+typedef struct {
+    WCHAR      title[MAX_TITLE];
+    int        has_ddl;
+    SYSTEMTIME ddl;
+    int        done;
+    WCHAR     *note;
+    WCHAR      when[32];    /* "YYYY-MM-DD HH:MM" */
+} TrashItem;
 
 typedef struct {
     int x, y;        /* 窗口左上角 */
@@ -139,6 +150,10 @@ struct App {
     int    sync_ticks;       /* 已等待的定时器次数 */
     WCHAR  sync_msg[96];     /* 标题栏状态文字，空则显示常规计数 */
     int    sync_msg_left;    /* 状态文字还要显示几个 tick（0 = 常驻到任务结束） */
+
+    /* ---- 垃圾箱（手动删掉的条目，最多 TRASH_MAX 条，新的在前） ---- */
+    TrashItem *trash;
+    int        trash_n, trash_cap;
 };
 
 /* ---------------- json.c ---------------- */
@@ -206,11 +221,22 @@ void  img_gc(App *a);
 void  note_head(const WCHAR *note, WCHAR *buf, int n);
 WCHAR *wdup(const WCHAR *s);
 
+/* ---------------- 垃圾箱（store.c） ---------------- */
+void  trash_load(App *a);
+void  trash_free(App *a);
+void  trash_add(App *a, const Todo *t);   /* 删一条待办时调用，超出 TRASH_MAX 丢最旧 */
+int   trash_restore(App *a, int idx);     /* 恢复到待办列表，1 = 成功 */
+void  trash_drop(App *a, int idx);        /* 从垃圾箱里彻底删掉 */
+void  trash_clear(App *a);
+void  trash_save(App *a);
+
 /* ---------------- detail.c ---------------- */
 void  detail_open(App *a, int ti);
 void  detail_destroy(void);
 void  courses_open(App *a);      /* 「筛选课程」：手动维护旧课退休名单 */
 void  courses_destroy(void);
+void  trash_open(App *a);        /* 「垃圾箱」：看/恢复手动删掉的条目 */
+void  trash_win_destroy(void);
 HWND  detail_hwnd(void);
 
 /* ---------------- theme.c ---------------- */

@@ -58,6 +58,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdline, int show)
     }
     theme_init(a);
     store_load(a);
+    trash_load(a);
     list_build_view(a);
 
     /* 上次贴了边：先对齐到那条边，再按上次的收起/展开状态复位 */
@@ -107,6 +108,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdline, int show)
         else if (cl && wcsstr(cl, L"--courses")) courses_open(a);
         else if (cl && wcsstr(cl, L"--theme")) theme_dlg_open(a);
         else if (cl && wcsstr(cl, L"--login")) login_open(a);
+        else if (cl && wcsstr(cl, L"--trash")) trash_open(a);
     }
 
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {

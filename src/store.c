@@ -498,6 +498,7 @@ void store_free(App *a)
     free(a->todos.v); a->todos.v = NULL;
     free(a->todos.view); a->todos.view = NULL;
     a->todos.n = a->todos.cap = a->todos.vcap = 0;
+    trash_free(a);
 }
 
 static int list_less(App *a, int i, int j)
@@ -637,6 +638,7 @@ void store_remove(App *a, int ti)
 {
     int i;
     if (ti < 0 || ti >= a->todos.n) return;
+    trash_add(a, &a->todos.v[ti]);          /* 先留一份进垃圾箱，再销毁 */
     free(a->todos.v[ti].note); a->todos.v[ti].note = NULL;
     free(a->todos.v[ti].img);  a->todos.v[ti].img = NULL;
     for (i = ti; i < a->todos.n - 1; i++) a->todos.v[i] = a->todos.v[i + 1];
@@ -645,6 +647,64 @@ void store_remove(App *a, int ti)
     list_build_view(a);
     store_save(a);
     img_gc(a);
+}
+
+/* ================= 垃圾箱 ================= */
+
+static void trash_free_item(TrashItem *t)
+{
+    free(t->note);
+    memset(t, 0, sizeof(TrashItem));
+}
+
+void trash_free(App *a)
+{
+    int i;
+    for (i = 0; i < a->trash_n; i++) trash_free_item(&a->trash[i]);
+    free(a->trash);
+    a->trash = NULL;
+    a->trash_n = 0;
+    a->trash_cap = 0;
+}
+
+static int trash_slot(App *a)
+{
+    if (a->trash_n < a->trash_cap) return 1;
+    {
+        int nc = a->trash_cap ? a->trash_cap * 2 : 8;
+        TrashItem *nv = (TrashItem *)realloc(a->trash, (size_t)nc * sizeof(TrashItem));
+        if (!nv) return 0;
+        memset(nv + a->trash_cap, 0, (size_t)(nc - a->trash_cap) * sizeof(TrashItem));
+        a->trash = nv;
+        a->trash_cap = nc;
+    }
+    return 1;
+}
+
+/* 插到最前面（最新的在最上），超出 TRASH_MAX 丢掉最旧的一条 */
+void trash_add(App *a, const Todo *t)
+{
+    int i;
+    if (!t) return;
+    if (!trash_slot(a)) return;
+    for (i = a->trash_n; i > 0; i--) a->trash[i] = a->trash[i - 1];
+    a->trash_n++;
+    memset(&a->trash[0], 0, sizeof(TrashItem));
+    wcpy(a->trash[0].title, t->title, MAX_TITLE);
+    a->trash[0].has_ddl = t->has_ddl;
+    a->trash[0].ddl = t->ddl;
+    a->trash[0].done = t->done;
+    a->trash[0].note = wdup(t->note);
+    {
+        SYSTEMTIME now;
+        GetLocalTime(&now);
+        ddl_to_text(&now, a->trash[0].when, 32);
+    }
+    while (a->trash_n > TRASH_MAX) {     /* 超了就把最后一条扔掉 */
+        trash_free_item(&a->trash[a->trash_n - 1]);
+        a->trash_n--;
+    }
+    trash_save(a);
 }
 
 /* ================= 说明文字 / 图片 ================= */
@@ -999,5 +1059,108 @@ int cfg_load(App *a)
     json_free(root);
     if (a->cfg.width < 220) a->cfg.width = 220;
     if (a->cfg.width > 900) a->cfg.width = 900;
+    return 1;
+}
+
+/* ================= 垃圾箱：读写与操作 ================= */
+
+void trash_save(App *a)
+{
+    SB b;
+    WCHAR path[MAX_PATH], dir[MAX_PATH];
+    int i;
+    b.p = NULL; b.len = 0; b.cap = 0;
+    sb_puts(&b, "{\n  \"version\": 1,\n  \"items\": [");
+    for (i = 0; i < a->trash_n; i++) {
+        TrashItem *t = &a->trash[i];
+        sb_puts(&b, i ? ",\n    {" : "\n    {");
+        sb_puts(&b, "\"t\": "); sb_putw(&b, t->title);
+        if (t->has_ddl) { sb_puts(&b, ", \"ddl\": "); sb_putdate(&b, &t->ddl); }
+        if (t->done) sb_puts(&b, ", \"done\": 1");
+        if (t->note && t->note[0]) { sb_puts(&b, ", \"note\": "); sb_putw(&b, t->note); }
+        if (t->when[0]) { sb_puts(&b, ", \"del\": "); sb_putw(&b, t->when); }
+        sb_putc(&b, '}');
+    }
+    sb_puts(&b, a->trash_n ? "\n  ]\n}\n" : "]\n}\n");
+    data_path(path, MAX_PATH, L"trash.json");
+    data_path(dir, MAX_PATH, NULL);
+    ensure_dir(dir);
+    write_atomic(path, b.p ? b.p : "{}", b.len);
+    free(b.p);
+}
+
+void trash_load(App *a)
+{
+    WCHAR path[MAX_PATH];
+    char *raw;
+    int len = 0, i;
+    JVal *root, *arr;
+    a->trash_n = 0;
+    data_path(path, MAX_PATH, L"trash.json");
+    raw = read_file(path, &len);
+    if (!raw) return;
+    root = json_parse(raw);
+    free(raw);
+    if (!root) return;
+    arr = json_get(root, L"items");
+    if (arr && arr->t == J_ARR) {
+        for (i = 0; i < arr->n && a->trash_n < TRASH_MAX; i++) {
+            JVal *it = arr->items[i];
+            const WCHAR *t, *ds, *ns, *ws;
+            TrashItem *ti;
+            if (!it || it->t != J_OBJ) continue;
+            t = json_wstr(it, L"t", L"");
+            if (!t[0]) continue;
+            if (!trash_slot(a)) break;
+            ti = &a->trash[a->trash_n++];
+            memset(ti, 0, sizeof(TrashItem));
+            wcpy(ti->title, t, MAX_TITLE);
+            ti->done = json_int(it, L"done", 0) ? 1 : 0;
+            ds = json_wstr(it, L"ddl", NULL);
+            if (ds && parse_date_str(ds, &ti->ddl)) ti->has_ddl = 1;
+            ns = json_wstr(it, L"note", NULL);
+            if (ns && ns[0]) ti->note = wdup(ns);
+            ws = json_wstr(it, L"del", NULL);
+            if (ws) wcpy(ti->when, ws, 32);
+        }
+    }
+    json_free(root);
+}
+
+void trash_drop(App *a, int idx)
+{
+    int i;
+    if (idx < 0 || idx >= a->trash_n) return;
+    trash_free_item(&a->trash[idx]);
+    for (i = idx; i < a->trash_n - 1; i++) a->trash[i] = a->trash[i + 1];
+    a->trash_n--;
+    memset(&a->trash[a->trash_n], 0, sizeof(TrashItem));
+    trash_save(a);
+}
+
+void trash_clear(App *a)
+{
+    int i;
+    for (i = 0; i < a->trash_n; i++) trash_free_item(&a->trash[i]);
+    a->trash_n = 0;
+    trash_save(a);
+}
+
+int trash_restore(App *a, int idx)
+{
+    TrashItem *t;
+    Todo *td;
+    if (idx < 0 || idx >= a->trash_n) return 0;
+    t = &a->trash[idx];
+    td = list_push(a);
+    if (!td) return 0;
+    wcpy(td->title, t->title, MAX_TITLE);
+    td->has_ddl = t->has_ddl;
+    td->ddl = t->ddl;
+    td->done = t->done;
+    td->note = wdup(t->note);
+    trash_drop(a, idx);
+    list_build_view(a);
+    store_save(a);
     return 1;
 }

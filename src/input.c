@@ -21,6 +21,7 @@
 #define MENU_COURSES  1018      /* 筛选课程（旧课退休名单） */
 #define MENU_THEME_DLG 1019     /* 主题…（自定义配色 + 玻璃） */
 #define MENU_LOGIN    1020      /* 登录学习通… */
+#define MENU_TRASH    1021      /* 垃圾箱… */
 
 /* 字号档位（百分比） */
 static const int FONT_STEPS[4] = { 85, 100, 115, 135 };
@@ -392,6 +393,7 @@ void input_context_menu(App *a, int x, int y)
     AppendMenuW(m, MF_STRING, MENU_LOGIN,
                 login_has_cred() ? L"登录学习通…（改账号密码）" : L"登录学习通…（必填）");
     AppendMenuW(m, MF_STRING, MENU_COURSES, L"筛选课程");
+    AppendMenuW(m, MF_STRING | (a->trash_n > 0 ? 0 : MF_GRAYED), MENU_TRASH, L"垃圾箱…");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, MENU_QUIT, L"退出");
 
@@ -465,6 +467,9 @@ void input_context_menu(App *a, int x, int y)
         break;
     case MENU_COURSES:
         courses_open(a);
+        break;
+    case MENU_TRASH:
+        trash_open(a);
         break;
     case MENU_QUIT:
         widget_quit(a);
