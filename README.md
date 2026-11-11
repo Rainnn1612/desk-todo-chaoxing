@@ -99,6 +99,8 @@ out\DeskTodo.exe
 - 「彻底删除」和「清空垃圾箱」都会先弹一次确认。
 - 数据存在 `%APPDATA%\DeskTodo\trash.json`，和 `todos.json` 分开，删待办不会动到你现有的数据文件。
 
+  ![垃圾箱](docs/screenshot-trash.png)
+
 ### 窗口
 - 拖动标题栏移动；左右边缘可拉伸宽度（记忆 220–900）。
 - 位置、宽度、主题、顺序全部记忆，下次启动复位。
