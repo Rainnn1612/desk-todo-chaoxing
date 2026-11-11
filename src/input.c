@@ -16,7 +16,7 @@
 #define MENU_FONT_4   1013      /* 特大 */
 #define MENU_FONT_IN  1014      /* 更大 +10% */
 #define MENU_FONT_OUT 1015      /* 更小 -10% */
-#define MENU_DETAIL   1016      /* 备注与图片 */
+#define MENU_DETAIL   1016      /* 备注 */
 #define MENU_SYNC     1017      /* 立即同步学习通 */
 #define MENU_COURSES  1018      /* 筛选课程（旧课退休名单） */
 #define MENU_THEME_DLG 1019     /* 主题…（自定义配色 + 玻璃） */
@@ -193,12 +193,6 @@ void input_lbutton_down(App *a, int x, int y)
         InvalidateRect(a->hwnd, NULL, FALSE);
         return;
     }
-    if (h.type == HIT_NOTE && h.index >= 0 && h.index < a->todos.n) {
-        a->pressed = 0;
-        a->press_row = -1;
-        detail_open(a, a->todos.view[h.index]);
-        return;
-    }
 }
 
 void input_lbutton_up(App *a, int x, int y)
@@ -364,7 +358,7 @@ void input_context_menu(App *a, int x, int y)
     AppendMenuW(m, MF_STRING, MENU_ADD, L"新增待办");
     AppendMenuW(m, MF_STRING | (can_edit ? 0 : MF_GRAYED), MENU_EDIT, L"编辑");
     AppendMenuW(m, MF_STRING | (can_edit ? 0 : MF_GRAYED), MENU_DEL, L"删除");
-    AppendMenuW(m, MF_STRING | (can_edit ? 0 : MF_GRAYED), MENU_DETAIL, L"备注与图片…");
+    AppendMenuW(m, MF_STRING | (can_edit ? 0 : MF_GRAYED), MENU_DETAIL, L"备注…");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | (a->cfg.topmost ? MF_CHECKED : 0), MENU_TOP, L"总在最前");
     AppendMenuW(m, MF_STRING | (a->cfg.edge ? MF_CHECKED : 0), MENU_PEEK, L"贴边隐藏（拖到屏幕边松手）");

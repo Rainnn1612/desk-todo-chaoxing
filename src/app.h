@@ -202,20 +202,9 @@ int   store_set_detail(App *a, int ti, const WCHAR *note, const WCHAR *img);
 int   store_add_full(App *a, const WCHAR *title, const WCHAR *note,
                      int has_ddl, const SYSTEMTIME *ddl);
 void  img_path_of(const WCHAR *name, WCHAR *out, int n);
-int   img_import(const WCHAR *src, WCHAR *out, int n);
 void  img_gc(App *a);
 void  note_head(const WCHAR *note, WCHAR *buf, int n);
 WCHAR *wdup(const WCHAR *s);
-
-/* ---------------- image.c （GDI+ 解码，只在打开详情窗时才加载） ---------------- */
-typedef struct Img Img;
-Img  *img_open(const WCHAR *path);
-void  img_close(Img *im);
-int   img_width(Img *im);
-int   img_height(Img *im);
-void  img_draw_fit(Img *im, HDC dc, const RECT *box, int pad);
-int   img_ready(void);
-void  img_shutdown(void);
 
 /* ---------------- detail.c ---------------- */
 void  detail_open(App *a, int ti);

@@ -671,50 +671,7 @@ void img_path_of(const WCHAR *name, WCHAR *out, int n)
     out[j] = 0;
 }
 
-/* 把选中的图片复制进数据目录，返回新文件名（img1.png 这种）。
-   只存文件名不存原始路径，原图被移动/删除也不影响。 */
-int img_import(const WCHAR *src, WCHAR *out, int n)
-{
-    WCHAR dir[MAX_PATH], dst[MAX_PATH], ext[8];
-    const WCHAR *dot = NULL;
-    int i, k = 0;
-
-    if (!src || !src[0]) return 0;
-    for (i = 0; src[i]; i++) if (src[i] == L'.') dot = src + i;
-    ext[0] = 0;
-    if (dot) {
-        for (k = 0; k < 5 && dot[k + 1]; k++) {
-            WCHAR c = dot[k + 1];
-            if (!((c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
-                  (c >= L'0' && c <= L'9'))) break;
-            ext[k] = (c >= L'A' && c <= L'Z') ? (WCHAR)(c - L'A' + L'a') : c;
-        }
-    }
-    ext[k] = 0;
-
-    data_path(dir, MAX_PATH, NULL);
-    wcpy(dst, dir, MAX_PATH);
-    wcat(dst, L"\\img", MAX_PATH);
-    ensure_dir(dst);
-
-    for (i = 1; i < 100000; i++) {
-        wcpy(dst, dir, MAX_PATH);
-        wcat(dst, L"\\img\\img", MAX_PATH);
-        wcat_int(dst, i, MAX_PATH);
-        if (ext[0]) { wcat(dst, L".", MAX_PATH); wcat(dst, ext, MAX_PATH); }
-        if (GetFileAttributesW(dst) != INVALID_FILE_ATTRIBUTES) continue;
-        if (!CopyFileW(src, dst, TRUE)) return 0;
-        if (out && n > 0) {
-            wcpy(out, L"img", n);
-            wcat_int(out, i, n);
-            if (ext[0]) { wcat(out, L".", n); wcat(out, ext, n); }
-        }
-        return 1;
-    }
-    return 0;
-}
-
-/* 删掉 img 目录里已经没有任何待办引用到的图片（换图、删待办后留下的垃圾） */
+/* 删掉 img 目录里已经没有任何待办引用到的图片（历史遗留：旧版本支持给待办配图） */
 void img_gc(App *a)
 {
     WCHAR dir[MAX_PATH], pat[MAX_PATH], full[MAX_PATH];

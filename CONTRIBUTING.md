@@ -27,7 +27,7 @@ build.bat
 | `src/json.c` | 极简 JSON 解析器 |
 | `src/theme.c` | 调色板、DPI 与字号缩放、玻璃效果 |
 | `src/themdlg.c` / `src/colorpick.c` | 「主题」窗口与 HSV 取色器 |
-| `src/detail.c` | 「备注与图片」详情窗 |
+| `src/detail.c` | 「备注」窗口 |
 | `src/courses.c` | 「筛选课程」窗口 |
 | `src/sync.c` | 学习通同步的子进程调度与结果合并 |
 | `src/main.c` | 启动、单实例、命令行开关 |

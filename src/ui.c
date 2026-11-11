@@ -59,28 +59,6 @@ static void del_rect(App *a, int i, RECT *r)
     r->bottom = r->top + s;
 }
 
-/* 行内那个「图」/「文」小标记：有说明或图片才出现，点它打开详情窗 */
-static int row_badge(App *a, int i, RECT *r)
-{
-    RECT rr;
-    Todo *t;
-    int w, right;
-
-    if (i < 0 || i >= a->todos.n) return 0;
-    t = &a->todos.v[a->todos.view[i]];
-    if (!((t->note && t->note[0]) || (t->img && t->img[0]))) return 0;
-
-    row_rect(a, i, &rr);
-    right = rr.right - fz(a, 10);
-    if (a->hover_row == i && !a->dragging) right -= fz(a, 18);
-    w = fz(a, 15);
-    r->right = right;
-    r->left = right - w;
-    r->top = rr.top + (a->row_h - w) / 2;
-    r->bottom = r->top + w;
-    return 1;
-}
-
 void ui_hdr_btn_rect(App *a, int which, RECT *r)
 {
     int s = a->header_h - fz(a, 6);
@@ -155,7 +133,6 @@ Hit ui_hit(App *a, int x, int y)
             if (i < a->todos.n && i != a->editing) {
                 del_rect(a, i, &r);
                 if (a->hover_row == i && PtInRect(&r, pt)) { h.type = HIT_DEL; return h; }
-                if (row_badge(a, i, &r) && PtInRect(&r, pt)) { h.type = HIT_NOTE; return h; }
             }
             h.type = HIT_ROW;
             return h;
@@ -292,20 +269,12 @@ static void draw_row(HDC dc, App *a, int i)
     ddl_text(t, dt, 48);
     if (dt[0]) dtw = text_w(dc, a->f_small, dt);
 
-    /* 从右侧往里排：×（悬停时）→ 图/文标记 → DDL → 标题 → 说明后缀 */
+    /* 从右侧往里排：×（悬停时）→ DDL → 标题 → 说明后缀 */
     {
         int right = rr.right - fz(a, 10);
         int hover = (a->hover_row == i && !a->dragging);
-        RECT bd;
 
         if (hover) right -= fz(a, 18);
-        if (row_badge(a, i, &bd)) {
-            text(dc, a->f_small,
-                 (t->img && t->img[0]) ? L"图" : L"文", &bd,
-                 theme_color(a, C_ACCENT),
-                 DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-            right = bd.left - fz(a, 4);
-        }
 
         tr = rr;
         tr.left = cr.right + fz(a, 9);
