@@ -70,6 +70,44 @@ static void free_res(void)
 
 /* ---------------- 读课程清单 ---------------- */
 
+static int line_key(const WCHAR *ln, WCHAR *out, int n);
+
+/* 「勾没勾」的真相是退休名单 sync_retired.txt，不是 courses.json。
+   courses.json 只是上次同步时的快照：保存完不重新同步，它还是旧的，
+   照它画勾就会出现「保存成功但下次打开又变回没勾」的假象。 */
+static void load_retired_flags(void)
+{
+    WCHAR path[MAX_PATH];
+    char *raw;
+    WCHAR *w = NULL;
+    WCHAR k[64];
+    int len = 0, i, j, s;
+
+    for (i = 0; i < C.n; i++) C.was[i] = 0;
+
+    data_path(path, MAX_PATH, L"sync_retired.txt");
+    raw = read_file(path, &len);
+    if (!raw) return;
+    w = u82w(raw);
+    free(raw);
+    if (!w) return;
+
+    i = 0;
+    while (w[i]) {
+        s = i;
+        while (w[i] && w[i] != L'\r' && w[i] != L'\n') i++;
+        if (w[i]) {
+            WCHAR c = w[i];
+            w[i++] = 0;
+            if (c == L'\r' && w[i] == L'\n') i++;      /* CRLF 只吃掉一对 */
+        }
+        if (!line_key(w + s, k, 64)) continue;
+        for (j = 0; j < C.n; j++)
+            if (!_wcsicmp(C.key[j], k)) C.was[j] = 1;
+    }
+    free(w);
+}
+
 static int load_courses(App *a)
 {
     WCHAR path[MAX_PATH];
@@ -96,12 +134,14 @@ static int load_courses(App *a)
             if (nm[0]) wcpy(C.name[n], nm, 128);
             else       wcpy(C.name[n], k, 128);
             C.cur[n] = json_int(o, L"cur", 0);
-            C.was[n] = json_int(o, L"retired", 0);
+            C.was[n] = 0;              /* 下面按退休名单重算 */
             n++;
         }
     }
     json_free(root);
     (void)a;
+    C.n = n;
+    load_retired_flags();
     return n;
 }
 
