@@ -33,6 +33,23 @@ int input_is_printable(WPARAM ch)
 
 /* ---------------- 编辑 ---------------- */
 
+/* 把第 row 行（view 下标）滚进可视范围。
+   列表超过一屏时，新行在末尾，把 scroll 归零会让编辑框落到可视区外面，
+   用户点「+ 添加待办」就会觉得没反应。 */
+static void scroll_to_row(App *a, int row)
+{
+    int vh = ui_viewport_h(a), maxs, y0, y1;
+    if (row < 0) return;
+    y0 = row * a->row_h;
+    y1 = y0 + a->row_h;
+    if (y0 < a->scroll) a->scroll = y0;
+    else if (y1 > a->scroll + vh) a->scroll = y1 - vh;
+    maxs = ui_content_h(a) - vh;
+    if (maxs < 0) maxs = 0;
+    if (a->scroll > maxs) a->scroll = maxs;
+    if (a->scroll < 0) a->scroll = 0;
+}
+
 void input_start_edit(App *a, int view_index, int is_new)
 {
     if (is_new) {
@@ -57,8 +74,8 @@ void input_start_edit(App *a, int view_index, int is_new)
         }
         a->editlen = wlen(a->edit);
     }
-    a->scroll = 0;
     widget_fit(a);
+    scroll_to_row(a, a->editing);      /* 编辑框必须在视野里 */
     InvalidateRect(a->hwnd, NULL, FALSE);
     widget_set_caret(a);
 }
@@ -78,6 +95,8 @@ void input_cancel(App *a)
 
 void input_commit(App *a)
 {
+    int was_new = a->edit_new, old_n = a->todos.n, i, row = -1;
+
     if (a->editing < 0) return;
     if (a->edit_new) {
         if (a->editlen > 0) store_add(a, a->edit);
@@ -91,6 +110,12 @@ void input_commit(App *a)
     a->caret = 0;
     DestroyCaret();
     widget_fit(a);
+    /* 刚加进来的那条要让人看见：排序后它可能在任何位置，按数组下标反查 view 位置 */
+    if (was_new && a->todos.n > old_n) {
+        for (i = 0; i < a->todos.n; i++)
+            if (a->todos.view[i] == old_n) { row = i; break; }
+        scroll_to_row(a, row);
+    }
     InvalidateRect(a->hwnd, NULL, FALSE);
 }
 

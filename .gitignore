@@ -15,3 +15,7 @@ desktop.ini
 /out/testdata/
 *.local
 cx.dat
+
+# 工具链的可选空格规避目录（junction / 软链，见 README「编译」）
+/tools/mingw/
+/tools/mingw64/

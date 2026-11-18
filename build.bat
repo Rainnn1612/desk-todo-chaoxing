@@ -4,11 +4,20 @@ rem ===== DeskTodo build script (MinGW-w64 / gcc) =====
 rem ASCII-only on purpose: .bat files are read with the OEM codepage.
 rem Toolchain lookup order:
 rem   1) MINGW_BIN env var, if you set it yourself
-rem   2) gcc already on PATH
-rem   3) winget-installed WinLibs package (BrechtSanders.WinLibs.*)
+rem   2) tools\mingw\bin (space-free junction to the toolchain, see README)
+rem   3) gcc already on PATH
+rem   4) winget-installed WinLibs package (BrechtSanders.WinLibs.*)
+rem
+rem Speed matters here: gcc must be reached through a path WITHOUT spaces.
+rem ld.exe splits its search dirs on spaces, so a profile like
+rem "C:\Users\Levi Li" makes the final link fail with
+rem   ld.exe: cannot find C:/Users/Levi: No such file or directory
+rem So the junction wins over whatever spaced copy winget put on PATH.
 if defined MINGW_BIN set "PATH=%MINGW_BIN%;%PATH%"
+if exist "%~dp0tools\mingw\bin\gcc.exe" set "PATH=%~dp0tools\mingw\bin;%PATH%"
 where gcc >nul 2>nul
-if errorlevel 1 for /d %%D in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.*") do if exist "%%D\mingw64\bin\gcc.exe" set "PATH=%%D\mingw64\bin;%PATH%"
+rem %%~sD = 8.3 short path, last resort for the same reason.
+if errorlevel 1 for /d %%D in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.*") do if exist "%%D\mingw64\bin\gcc.exe" set "PATH=%%~sD\mingw64\bin;%PATH%"
 where gcc >nul 2>nul
 if errorlevel 1 (
   echo [X] gcc not found.

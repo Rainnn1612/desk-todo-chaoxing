@@ -17,14 +17,20 @@
 ## 快速开始
 
 ```bat
-:: 编译（需要 MinGW-w64 gcc，路径写在 build.bat 里）
+:: 工具链：MinGW-w64 gcc（winget install BrechtSanders.WinLibs.POSIX.UCRT）
+:: 另外需要 Python 3，build.bat 用它生成图标
 build.bat
 
 :: 运行
 out\DeskTodo.exe
 ```
 
-产物：`out\DeskTodo.exe`（约 442 KB，双击即用，无需安装）。
+产物：`out\DeskTodo.exe`（约 512 KB，双击即用，无需安装）。
+
+> **如果你的 Windows 用户名里带空格**（例如 `C:\Users\Levi Li`），WinLibs **16.2.0** 的 `ld.exe` 会按空格切分搜索目录，链接阶段报
+> `ld.exe: cannot find C:/Users/Levi: No such file or directory`。两种办法任选：
+> 1. 装回已验证可用的 16.1.0：`winget install --id BrechtSanders.WinLibs.POSIX.UCRT --exact --version 16.1.0-14.0.0-r2 --force`
+> 2. 或者让 gcc 走无空格路径（**注意 junction/软链不行**，gcc 会把路径解析回真实长路径）：把工具链复制到 `F:\mingw64` 这类目录，然后 `set MINGW_BIN=F:\mingw64\bin` 再跑 `build.bat`。
 
 关闭窗口 = 收进托盘，程序继续在后台；要真正退出请用右键菜单 → **退出**。
 
@@ -216,7 +222,7 @@ out\DeskTodo.exe
 
 | 指标 | 实测 |
 | --- | --- |
-| exe 体积 | 521,216 字节（单文件，无 DLL 依赖；含内嵌的同步脚本） |
+| exe 体积 | 524,288 字节（单文件，无 DLL 依赖；含内嵌的同步脚本） |
 | 冷启动 | 45 ms 到窗口可见 |
 | 私有内存 | 1.8 MB |
 | 工作集 | 10.5 MB（其余为共享的系统 DLL）；同步时另起一个 powershell 子进程，结束即退出 |
